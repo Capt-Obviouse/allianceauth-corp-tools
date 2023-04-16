@@ -809,6 +809,35 @@ class CharacterLocation(models.Model):
 
 
 # ************************ Corp Models
+# Membership Models
+class CorpMemberTracking(models.Model):
+    character = models.OneToOneField(
+            CharacterAudit,
+            on_delete=models.PROTECT,
+            unique=True,
+            related_name="member_tracking")
+    # location_id = models.ForeignKey(CharacterAudit, on_delete=models.PROTECT)
+    logoff_date = models.DateTimeField()
+    logon_date = models.DateTimeField()
+    # ship_type_id
+    start_date = models.DateTimeField()
+
+    def __str__(self):
+        return self.character.character.character_name
+
+    def __repr__(self):
+        return self.__str__()
+
+    @property
+    def time_in_corp(self):
+        now = datetime.datetime.now(self.start_date.tzinfo)
+        return now - self.start_date
+
+    @property
+    def time_spent_last_online(self):
+        return self.logoff_date - self.logon_date
+
+
 # Structure models
 
 
@@ -1183,10 +1212,8 @@ class TimeInCorpFilter(FilterBase):
     def process_filter(self, user: User):
         try:
             main_character = user.profile.main_character.characteraudit
-            histories = CorporationHistory.objects.filter(
-                character=main_character).order_by('-start_date').first()
 
-            days = timezone.now() - histories.start_date
+            days = main_character.member_tracking.time_in_corp
             if days.days >= self.days_in_corp:
                 return True
             else:
@@ -1196,18 +1223,12 @@ class TimeInCorpFilter(FilterBase):
             return False
 
     def audit_filter(self, users):
-        co = users.annotate(
-            max_timestamp=Max(
-                'profile__main_character__characteraudit__corporationhistory__start_date')
-        ).values("id", "max_timestamp")
         chars = defaultdict(lambda: None)
-        for c in co:
-            if c['max_timestamp']:
-                days = timezone.now() - c['max_timestamp']
-                days = days.days
-            else:
-                days = -1
-            chars[c['id']] = days
+        for user in users:
+            main_character = user.profile.main_character.characteraudit
+            days = main_character.member_tracking.time_in_corp
+            days = days.days
+            chars[user.id] = days
 
         output = defaultdict(lambda: {"message": "", "check": False})
         for c, char_list in chars.items():

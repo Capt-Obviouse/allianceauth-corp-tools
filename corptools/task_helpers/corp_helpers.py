@@ -19,7 +19,8 @@ from .. import providers
 from ..models import (BridgeOzoneLevel, CorpAsset, CorporationAudit,
                       CorporationWalletDivision, CorporationWalletJournalEntry,
                       EveItemType, EveLocation, EveName, Structure,
-                      StructureCelestial, StructureService)
+                      StructureCelestial, StructureService, CorpMemberTracking,
+                      CharacterAudit)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,50 @@ def get_corp_token(corp_id, scopes, req_roles):
 
     return False
 
+def update_corp_member_tracking(corp_id):
+    audit_corp = CorporationAudit.objects.get(
+        corporation__corporation_id=corp_id)
+    logger.debug("Updating Corp Member Tracking for: {}".format(
+        audit_corp.corporation))
+
+    req_scopes = ['esi-corporations.track_members.v1',]
+    req_roles = ['Director']
+
+    token = get_corp_token(corp_id, req_scopes, req_roles)
+
+    if not token:
+        return "No Tokens"
+    try:
+        resp = providers.esi.client.Corporation.get_corporations_corporation_id_membertracking(
+            corporation_id=corp_id, token=token.valid_access_token())
+
+    except Exception as e:
+        # Temporary Pass
+        print(f"Error: {e}")
+        pass
+
+    print(resp.result())
+    members = resp.result()
+    for member in members:
+        logon_date = member['logon_date']
+        logoff_date = member['logoff_date']
+        start_date = member['start_date']
+
+        try:
+            character = CharacterAudit.objects.get(
+                    character__character_id=member['character_id'])
+        except CharacterAudit.DoesNotExist as e:
+            # Handle character not on auth
+            continue
+
+        obj, created = CorpMemberTracking.objects.update_or_create(
+                character=character,
+                defaults={
+                    "logoff_date": member['logoff_date'],
+                    "logon_date": member['logon_date'],
+                    "start_date": member['start_date'],
+                }
+        )
 
 # pagnated results
 def update_corp_wallet_journal(corp_id, wallet_division, full_update=False):

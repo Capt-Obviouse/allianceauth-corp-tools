@@ -734,11 +734,9 @@ def update_corp_wallet(self, corp_id, full_update=False):
 def update_corp_structures(self, corp_id):
     return corp_helpers.update_corp_structures(corp_id)
 
-
 @shared_task(bind=True, base=QueueOnce)
 def update_corp_assets(self, corp_id):
     return corp_helpers.update_corp_assets(corp_id)
-
 
 @shared_task
 def update_corp(corp_id):
@@ -749,7 +747,14 @@ def update_corp(corp_id):
     que.append(update_corp_wallet.si(corp_id))
     que.append(update_corp_structures.si(corp_id))
     que.append(update_corp_assets.si(corp_id))
+    que.append(update_corp_member_tracking.si(corp_id))
     chain(que).apply_async(priority=6)
+
+@shared_task
+def update_corp_member_tracking():
+    corps = CorporationAudit.objects.all().select_related('corporation')
+    for corp in corps:
+        corp_helpers.update_corp_member_tracking(corp.corporation.corporation_id)
 
 
 @shared_task
