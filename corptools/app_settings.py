@@ -6,11 +6,12 @@ CORPTOOLS_DISCORD_BOT_COGS = getattr(
     settings, 'CORPTOOLS_DISCORD_BOT_COGS', ["corptools.cogs.routes", "corptools.cogs.locate"])
 
 CT_CHAR_MAX_INACTIVE_DAYS = getattr(settings, 'CT_CHAR_MAX_INACTIVE_DAYS', 3)
+
 CT_CHAR_ASSETS_MODULE = getattr(settings, 'CT_CHAR_ASSETS_MODULE', True)
 CT_CHAR_STANDINGS_MODULE = getattr(settings, 'CT_CHAR_STANDINGS_MODULE', True)
 CT_CHAR_KILLMAILS_MODULE = getattr(settings, 'CT_CHAR_KILLMAILS_MODULE', True)
 CT_CHAR_FITTINGS_MODULE = getattr(settings, 'CT_CHAR_FITTINGS_MODULE', True)
-CT_CHAR_CALLENDAR_MODULE = getattr(settings, 'CT_CHAR_CALLENDAR_MODULE', True)
+CT_CHAR_CALENDAR_MODULE = getattr(settings, 'CT_CHAR_CALENDAR_MODULE', True)
 CT_CHAR_CONTACTS_MODULE = getattr(settings, 'CT_CHAR_CONTACTS_MODULE', True)
 CT_CHAR_NOTIFICATIONS_MODULE = getattr(
     settings, 'CT_CHAR_NOTIFICATIONS_MODULE', True)
@@ -47,8 +48,6 @@ CT_CHAR_ACTIVE_IGNORE_ROLES_MODULE = getattr(
     settings, 'CT_CHAR_ACTIVE_IGNORE_ROLES_MODULE', False)
 CT_CHAR_ACTIVE_IGNORE_INDUSTRY_MODULE = getattr(
     settings, 'CT_CHAR_ACTIVE_IGNORE_INDUSTRY_MODULE', False)
-CT_CHAR_ACTIVE_IGNORE_MINING_MODULE = getattr(
-    settings, 'CT_CHAR_ACTIVE_IGNORE_MINING_MODULE', False)
 CT_CHAR_ACTIVE_IGNORE_WALLET_MODULE = getattr(
     settings, 'CT_CHAR_ACTIVE_IGNORE_WALLET_MODULE', False)
 CT_CHAR_ACTIVE_IGNORE_SKILLS_MODULE = getattr(
@@ -66,6 +65,10 @@ CT_CHAR_PAUSE_CONTRACTS = getattr(settings, 'CT_CHAR_PAUSE_CONTRACTS', False)
 # New scopes so existing all will fail so lets ignore this by default.
 CT_CHAR_ACTIVE_IGNORE_LOYALTYPOINTS_MODULE = getattr(
     settings, 'CT_CHAR_ACTIVE_IGNORE_LOYALTYPOINTS_MODULE', True)
+
+# Swap to true for a release or 2
+CT_CHAR_ACTIVE_IGNORE_MINING_MODULE = getattr(
+    settings, 'CT_CHAR_ACTIVE_IGNORE_MINING_MODULE', True)
 
 
 def get_character_scopes():
@@ -99,7 +102,7 @@ def get_character_scopes():
             'esi-fittings.read_fittings.v1',
         ]
 
-    if CT_CHAR_CALLENDAR_MODULE:
+    if CT_CHAR_CALENDAR_MODULE:
         _scopes += [
             # Callendar
             'esi-calendar.read_calendar_events.v1',
@@ -227,6 +230,11 @@ def get_character_update_attributes():
         _attribs += [
             # Notifications
             ("Notifications", 'last_update_notif'),
+        ]
+    if CT_CHAR_NOTIFICATIONS_MODULE:
+        _attribs += [
+            # Notifications
+            ("Mining", 'last_update_mining'),
         ]
 
     if CT_CHAR_ROLES_MODULE:

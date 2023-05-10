@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import timedelta
 
 from allianceauth.eveonline.models import EveCorporationInfo
 from bravado import exception
@@ -13,7 +14,8 @@ from corptools.task_helpers.update_tasks import fetch_location_name
 from .. import providers
 from ..models import (CharacterAsset, CharacterAudit, CharacterContact,
                       CharacterContactLabel, CharacterLocation,
-                      CharacterMarketOrder, CharacterRoles, CharacterTitle,
+                      CharacterMarketOrder, CharacterMiningLedger,
+                      CharacterRoles, CharacterTitle,
                       CharacterWalletJournalEntry, Clone, Contract,
                       ContractItem, CorporationHistory, EveItemType,
                       EveLocation, EveName, Implant, JumpClone, LoyaltyPoint,
@@ -371,6 +373,73 @@ def update_character_assets(character_id, force_refresh=False):
     return "CT: Finished assets for: {}".format(audit_char.character.character_name)
 
 
+def update_character_mining(character_id, force_refresh=False):
+    audit_char = CharacterAudit.objects.get(
+        character__character_id=character_id)
+    logger.debug("Updating Mining for: {}".format(
+        audit_char.character.character_name))
+
+    req_scopes = ['esi-industry.read_character_mining.v1']
+
+    token = get_token(character_id, req_scopes)
+
+    if not token:
+        return "No Tokens"
+    try:
+        mining_op = providers.esi.client.Industry.get_characters_character_id_mining(
+            character_id=character_id)
+
+        ledger = etag_results(mining_op, token, force_refresh=force_refresh)
+
+        _st = time.perf_counter()
+        existings_pks = set(CharacterMiningLedger.objects.filter(
+            character=audit_char, date__gte=timezone.now()-timedelta(days=30)
+        ).values_list("id", flat=True))
+        type_ids = set()
+        new_events = []
+        old_events = []
+        for event in ledger:
+
+            type_ids.add(event.get('type_id'))
+            pk = CharacterMiningLedger.create_primary_key(character_id, event)
+            _e = CharacterMiningLedger(
+                character=audit_char,
+                id=pk,
+                date=event.get('date'),
+                type_name_id=event.get('type_id'),
+                system_id=event.get('solar_system_id'),
+                quantity=event.get('quantity')
+            )
+            if pk in existings_pks:
+                old_events.append(_e)
+            else:
+                new_events.append(_e)
+
+        EveItemType.objects.create_bulk_from_esi(list(type_ids))
+
+        if len(new_events):
+            CharacterMiningLedger.objects.bulk_create(
+                new_events, ignore_conflicts=True)
+
+        if len(old_events):
+            CharacterMiningLedger.objects.bulk_update(
+                old_events, fields=['quantity'])
+
+        logger.debug(
+            f"CT_TIME: {time.perf_counter()-_st} update_character_mining {character_id}")
+
+    except NotModifiedError:
+        logger.info("CT: No New Mining for: {}".format(
+            audit_char.character.character_name))
+        pass
+
+    audit_char.last_update_mining = timezone.now()
+    audit_char.save()
+    audit_char.is_active()
+
+    return "CT: Finished Mining for: {}".format(audit_char.character.character_name)
+
+
 def get_current_ship_location(character_id, force_refresh=False):
     audit_char = CharacterAudit.objects.get(
         character__character_id=character_id)
@@ -547,7 +616,7 @@ def update_character_transactions(character_id, force_refresh=False):
                 ).update(
                     reason=message
                 )
-                print(f"{audit_char.character.character_name} {message}")
+                #print(f"{audit_char.character.character_name} {message}")
         logger.debug(
             f"CT_TIME: {time.perf_counter()-_st} update_character_transactions {character_id}")
 
@@ -649,26 +718,30 @@ def update_character_loyaltypoints(character_id, force_refresh=False):
     if not token:
         return "No Tokens"
 
-    loyaltypoints_op = providers.esi.client.Loyalty.get_characters_character_id_loyalty_points(
-        character_id=character_id)
+    try:
+        loyaltypoints_op = providers.esi.client.Loyalty.get_characters_character_id_loyalty_points(
+            character_id=character_id)
 
-    loyaltypoints = etag_results(
-        loyaltypoints_op, token, force_refresh=force_refresh)
+        loyaltypoints = etag_results(
+            loyaltypoints_op, token, force_refresh=force_refresh)
 
-    _bulkcreate = []
+        _bulkcreate = []
 
-    for lp in loyaltypoints:
-        lp_corp, _ = EveName.objects.get_or_create_from_esi(
-            lp.get('corporation_id'))
+        for lp in loyaltypoints:
+            lp_corp, _ = EveName.objects.get_or_create_from_esi(
+                lp.get('corporation_id'))
 
-        _bulkcreate.append(
-            LoyaltyPoint(
-                character=audit_char,
-                corporation=lp_corp,
-                amount=lp.get('loyalty_points')))
+            _bulkcreate.append(
+                LoyaltyPoint(
+                    character=audit_char,
+                    corporation=lp_corp,
+                    amount=lp.get('loyalty_points')))
 
-    LoyaltyPoint.objects.bulk_create(
-        _bulkcreate, ignore_conflicts=True, batch_size=500)
+        LoyaltyPoint.objects.bulk_create(
+            _bulkcreate, ignore_conflicts=True, batch_size=500)
+    except NotModifiedError:
+        logger.info("CT: No New LP data for: {}".format(
+            audit_char.character.character_name))
 
     audit_char.last_update_loyaltypoints = timezone.now()
     audit_char.save()
@@ -1313,6 +1386,8 @@ def update_character_contracts(character_id, force_refresh=False):
 
     token = get_token(character_id, req_scopes)
 
+    new_contract_ids = []
+
     if not token:
         return False, []
     try:
@@ -1382,6 +1457,10 @@ def update_character_contracts(character_id, force_refresh=False):
         logger.debug(
             f"CT_TIME: {time.perf_counter()-_st} update_character_titles {character_id}")
 
+        new_contract_ids = [c.contract_id for c in contract_models_new]
+        if force_refresh:
+            new_contract_ids += [c.contract_id for c in contract_models_old]
+
     except NotModifiedError:
         logger.info("CT: No New Contracts for: {}".format(
             audit_char.character.character_name))
@@ -1390,10 +1469,6 @@ def update_character_contracts(character_id, force_refresh=False):
     audit_char.last_update_contracts = timezone.now()
     audit_char.save()
     audit_char.is_active()
-
-    new_contract_ids = [c.contract_id for c in contract_models_new]
-    if force_refresh:
-        new_contract_ids += [c.contract_id for c in contract_models_old]
 
     return "CT: Completed Contracts for: %s" % str(character_id), new_contract_ids
 
